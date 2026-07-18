@@ -58,12 +58,6 @@
   button:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(125,255,168,.5); }
   button:active { transform: translateY(1px); }
   .hint { font-size: 13px; opacity: .5; }
-  .sound-toggle {
-    position: fixed; bottom: 16px; right: 18px; z-index: 11;
-    pointer-events: auto; font-size: 22px; cursor: pointer;
-    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
-    width: 44px; height: 44px; border-radius: 12px; color: #eafff4;
-  }
 </style>
 </head>
 <body>
@@ -74,7 +68,6 @@
     <div class="stat" style="text-align:right;"><span class="label">Frogs freed</span><span class="value" id="frogs">0</span></div>
   </div>
 
-  <button class="sound-toggle" id="soundToggle" title="Toggle sound">🔊</button>
 
   <div class="overlay" id="startScreen">
     <div class="title">Blobbs Tadpole Poker</div>
@@ -154,7 +147,10 @@
   ];
   // starts at 0, overshoots, settles at 1 — used for the "grow in" on spawn
   function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+  const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+  const easeInCubic = (t) => t * t * t;
   let creatures = [], ripples = [], sparkles = [];
+  let groodle = null, groodleTimer = 8; // the fluffy visitor who pokes her snout in
   let score = 0, frogsFreed = 0, running = false, lastT = 0, spawnAcc = 0;
 
   const el = {
@@ -190,6 +186,44 @@
   }
 
   function ripple(x, y, color) { ripples.push({ x, y, r: 6, max: rand(40, 70), life: 1, color }); }
+
+  // ---------- the groodle (a fluffy white muppet who sniffs the pond) ----------
+  function groodleSize() { return Math.max(64, Math.min(W, H) * 0.09); }
+  function groodleReach() { return Math.min(W * 0.13, 250); }
+  function groodleTip(gr) {
+    const noseR = groodleSize() * 0.42, y = gr.y + (gr.bob || 0);
+    const into = -noseR + gr.depth * (groodleReach() + noseR);
+    return gr.side === "left" ? { x: into, y } : { x: W - into, y };
+  }
+  function spawnGroodle() {
+    groodle = {
+      side: Math.random() < 0.5 ? "left" : "right",
+      y: rand(H * 0.4, H * 0.72),
+      phase: "in", t: 0, depth: 0, bob: 0, rippleAcc: 0, splashed: false,
+    };
+  }
+  function updateGroodle(dt) {
+    if (!groodle) { groodleTimer -= dt; if (groodleTimer <= 0) spawnGroodle(); return; }
+    const gr = groodle, IN = 0.9, HOLD = 2.0, OUT = 0.85;
+    gr.t += dt;
+    if (gr.phase === "in") {
+      gr.depth = easeOutCubic(Math.min(1, gr.t / IN));
+      if (gr.t >= IN) { gr.phase = "hold"; gr.t = 0; }
+    } else if (gr.phase === "hold") {
+      gr.depth = 1; gr.bob = Math.sin(gr.t * 4.5) * 6;
+      if (gr.t >= HOLD) { gr.phase = "out"; gr.t = 0; }
+    } else {
+      gr.depth = 1 - easeInCubic(Math.min(1, gr.t / OUT));
+      if (gr.t >= OUT) { groodle = null; groodleTimer = rand(10, 20); return; }
+    }
+    // ripples spreading from where her wet nose dips into the water
+    if (gr.depth > 0.22) {
+      const tip = groodleTip(gr);
+      if (!gr.splashed) { gr.splashed = true; ripple(tip.x, tip.y, "rgba(220,235,255,.6)"); ripple(tip.x, tip.y, "rgba(220,235,255,.4)"); }
+      gr.rippleAcc += dt;
+      while (gr.rippleAcc >= 0.19) { gr.rippleAcc -= 0.19; ripple(tip.x + rand(-6, 6), tip.y + rand(-4, 4), "rgba(210,230,255,.5)"); }
+    } else { gr.splashed = false; }
+  }
   function sparkle(x, y, color, n = 12) {
     for (let i = 0; i < n; i++) {
       const a = rand(0, Math.PI * 2), sp = rand(40, 160);
@@ -322,6 +356,7 @@
       s.life -= dt * 1.8;
       if (s.life <= 0) sparkles.splice(i, 1);
     }
+    updateGroodle(dt);
   }
 
   // ---------- drawing ----------
@@ -577,6 +612,118 @@
     return "rgb(" + r + "," + g + "," + b + ")";
   }
 
+  function drawGroodleAt(gr) {
+    const S = groodleSize(), tip = groodleTip(gr);
+    ctx.save();
+    ctx.translate(tip.x, tip.y);
+    if (gr.side === "right") ctx.scale(-1, 1); // mirror so the snout points inward
+    // soft shadow she casts on the water
+    ctx.save();
+    ctx.globalAlpha = 0.14; ctx.translate(S * 0.1, S * 0.55); ctx.scale(1, 0.5);
+    ctx.beginPath(); ctx.arc(-S * 1.6, 0, S * 1.7, 0, Math.PI * 2);
+    ctx.fillStyle = "#000"; ctx.fill();
+    ctx.restore();
+    drawGroodle(ctx, S);
+    ctx.restore();
+  }
+
+  // Drawn with her wet nose tip at the origin, snout pointing +x (into the pond),
+  // fluffy head + body trailing off to -x (past the screen edge).
+  function drawGroodle(g, S) {
+    // ---- floppy ear draping down the side of the head ----
+    g.beginPath();
+    g.moveTo(-S * 2.0, -S * 0.5);
+    g.quadraticCurveTo(-S * 3.0, S * 0.2, -S * 2.7, S * 1.7);
+    g.quadraticCurveTo(-S * 2.2, S * 2.2, -S * 1.7, S * 1.4);
+    g.quadraticCurveTo(-S * 1.6, S * 0.4, -S * 1.7, -S * 0.3);
+    g.closePath();
+    g.fillStyle = "#e6eaf2"; g.fill();
+
+    // ---- shaggy white fur: an elongated snout, a head, and shoulders/body ----
+    const puffs = [
+      // snout / muzzle (tapered)
+      [-0.55, 0.12, 0.44], [-1.0, 0.06, 0.55], [-1.5, 0.0, 0.68],
+      // head
+      [-2.35, -0.15, 1.18], [-3.05, 0.0, 1.32], [-2.7, -1.05, 0.82], [-2.0, -0.7, 0.66],
+      // shoulders / chest / body mass
+      [-3.4, 0.95, 1.2], [-2.75, 1.2, 0.95], [-2.05, 0.9, 0.72], [-3.9, 0.2, 1.05],
+      // shaggy scallops on top
+      [-2.45, -1.5, 0.5], [-3.15, -1.25, 0.58],
+    ];
+    g.fillStyle = "#ffffff";
+    for (const p of puffs) { g.beginPath(); g.arc(S * p[0], S * p[1], S * p[2], 0, Math.PI * 2); g.fill(); }
+    // volume shading
+    const vol = g.createRadialGradient(-S * 2.0, -S * 1.0, S * 0.4, -S * 1.6, S * 0.5, S * 3.6);
+    vol.addColorStop(0, "rgba(255,255,255,0)");
+    vol.addColorStop(1, "rgba(196,206,222,0.5)");
+    g.fillStyle = vol;
+    for (const p of puffs) { g.beginPath(); g.arc(S * p[0], S * p[1], S * p[2], 0, Math.PI * 2); g.fill(); }
+
+    // ---- under-muzzle shadow ----
+    g.beginPath(); g.ellipse(-S * 0.7, S * 0.4, S * 0.8, S * 0.3, 0, 0, Math.PI * 2);
+    g.fillStyle = "rgba(198,208,224,0.4)"; g.fill();
+
+    // ---- red collar + bow tie at the throat ----
+    const RED = "#d23b3b", REDK = "#a02626", REDL = "#e86a6a";
+    // collar band hugging the neck under the head
+    g.strokeStyle = RED; g.lineWidth = S * 0.34; g.lineCap = "round";
+    g.beginPath();
+    g.moveTo(-S * 3.35, S * 0.7);
+    g.quadraticCurveTo(-S * 2.4, S * 1.6, -S * 1.2, S * 1.0);
+    g.stroke();
+    g.strokeStyle = REDK; g.lineWidth = S * 0.06;
+    g.beginPath();
+    g.moveTo(-S * 3.3, S * 0.85);
+    g.quadraticCurveTo(-S * 2.4, S * 1.72, -S * 1.25, S * 1.14);
+    g.stroke();
+    // bow tie at the front of the collar
+    const bx = -S * 1.75, by = S * 1.12;
+    g.fillStyle = RED;
+    g.beginPath(); // left wing
+    g.moveTo(bx - S * 0.08, by);
+    g.lineTo(bx - S * 0.75, by - S * 0.42);
+    g.lineTo(bx - S * 0.75, by + S * 0.42);
+    g.closePath(); g.fill();
+    g.beginPath(); // right wing
+    g.moveTo(bx + S * 0.08, by);
+    g.lineTo(bx + S * 0.75, by - S * 0.42);
+    g.lineTo(bx + S * 0.75, by + S * 0.42);
+    g.closePath(); g.fill();
+    g.fillStyle = REDL; // little highlight on each wing
+    g.beginPath(); g.moveTo(bx - S * 0.12, by); g.lineTo(bx - S * 0.6, by - S * 0.28); g.lineTo(bx - S * 0.6, by + S * 0.02); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(bx + S * 0.12, by); g.lineTo(bx + S * 0.6, by - S * 0.28); g.lineTo(bx + S * 0.6, by + S * 0.02); g.closePath(); g.fill();
+    g.fillStyle = REDK; // knot
+    g.beginPath(); g.ellipse(bx, by, S * 0.16, S * 0.24, 0, 0, Math.PI * 2); g.fill();
+
+    // ---- black button eyes ----
+    for (const e of [[-1.2, -0.35, 0.3], [-1.9, -0.48, 0.34]]) {
+      const ex = S * e[0], ey = S * e[1], er = S * e[2];
+      g.beginPath(); g.ellipse(ex, ey, er * 0.86, er, 0, 0, Math.PI * 2);
+      g.fillStyle = "#141118"; g.fill();
+      g.beginPath(); g.arc(ex - er * 0.28, ey - er * 0.34, er * 0.26, 0, Math.PI * 2);
+      g.fillStyle = "#ffffff"; g.fill();                       // catch-light
+      // shaggy brow tuft above the eye
+      g.strokeStyle = "#f1f4f9"; g.lineWidth = S * 0.17; g.lineCap = "round";
+      g.beginPath(); g.moveTo(ex - er * 1.0, ey - er * 1.1); g.lineTo(ex + er * 0.4, ey - er * 1.35); g.stroke();
+    }
+
+    // ---- big pink nose at the tip ----
+    const nx = -S * 0.26, ny = S * 0.06;
+    const ng = g.createRadialGradient(nx - S * 0.12, ny - S * 0.14, S * 0.04, nx, ny, S * 0.42);
+    ng.addColorStop(0, "#ffc4dc"); ng.addColorStop(0.5, "#f58fb6"); ng.addColorStop(1, "#e06a97");
+    g.beginPath(); g.ellipse(nx, ny, S * 0.38, S * 0.33, 0, 0, Math.PI * 2);
+    g.fillStyle = ng; g.fill();
+    g.fillStyle = "#b64f7c"; // nostrils
+    g.beginPath(); g.ellipse(nx - S * 0.02, ny - S * 0.06, S * 0.05, S * 0.08, -0.3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(nx + S * 0.16, ny - S * 0.02, S * 0.05, S * 0.08, 0.3, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(nx - S * 0.13, ny - S * 0.13, S * 0.1, S * 0.07, -0.5, 0, Math.PI * 2);
+    g.fillStyle = "rgba(255,255,255,.7)"; g.fill();           // shine
+    // little smile under the nose
+    g.strokeStyle = "#b98aa0"; g.lineWidth = S * 0.05; g.lineCap = "round";
+    g.beginPath(); g.moveTo(nx - S * 0.02, ny + S * 0.3);
+    g.quadraticCurveTo(-S * 0.6, S * 0.66, -S * 0.95, S * 0.45); g.stroke();
+  }
+
   let waterT = 0;
   function render() {
     waterT += 0.016;
@@ -608,6 +755,8 @@
       ctx.fillStyle = s.color; ctx.fill();
     }
     ctx.globalAlpha = 1;
+
+    if (groodle) drawGroodleAt(groodle); // she pokes in over the top of the pond
   }
 
   function loop(t) {
@@ -622,6 +771,7 @@
   function startGame() {
     ensureAudio();
     creatures = []; ripples = []; sparkles = [];
+    groodle = null; groodleTimer = rand(6, 10);
     score = 0; frogsFreed = 0; spawnAcc = 0;
     for (let i = 0; i < 6; i++) spawnTadpole();
     updateHUD();
@@ -644,12 +794,6 @@
 
   document.getElementById("startBtn").addEventListener("click", startGame);
   document.getElementById("againBtn").addEventListener("click", startGame);
-
-  const soundToggle = document.getElementById("soundToggle");
-  soundToggle.addEventListener("click", () => {
-    soundOn = !soundOn; ensureAudio();
-    soundToggle.textContent = soundOn ? "🔊" : "🔇";
-  });
 
   // ---------- start-screen stage demos ----------
   const demoCanvases = [...document.querySelectorAll(".demo")];
