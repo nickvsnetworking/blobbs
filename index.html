@@ -143,6 +143,15 @@
   // stage 0 tadpole, 1 tadlet, 2 frog, 3 hopping away (leaving)
   const FROG_COLORS = ["#6fdc6f", "#7dffa8", "#8fd14f", "#57c99a", "#a3e635"];
   const STAGE_MULT = [1, 1.4, 2.0, 2.0]; // relative size of tadpole / tadlet / frog
+  // little gentleman outfits — chosen per frog from its colour so it stays consistent
+  const FROG_OUTFITS = [
+    { vest: "#c85a6a", button: "#f4d58d", cravat: "#f6eede" }, // cranberry vest, cream cravat
+    { vest: "#4f7cc0", button: "#f0d060", cravat: "#f6eede" }, // royal blue vest
+    { vest: "#d59b3f", button: "#7a531c", cravat: "#8c3b52" }, // mustard vest, plum cravat
+    { vest: "#7d5ba6", button: "#f0d060", cravat: "#f6eede" }, // plum vest
+    { vest: "#c96b3f", button: "#f4d58d", cravat: "#39564c" }, // rust vest, forest cravat
+    { vest: "#3f7d6a", button: "#f4d58d", cravat: "#e8b6c4" }, // teal vest, rose cravat
+  ];
   // starts at 0, overshoots, settles at 1 — used for the "grow in" on spawn
   function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
   let creatures = [], ripples = [], sparkles = [];
@@ -174,6 +183,7 @@
       turnT: rand(0.6, 2),
       color: FROG_COLORS[(Math.random() * FROG_COLORS.length) | 0],
       pop: 0,            // squash-and-stretch pulse on tap
+      blink: 0, blinkCooldown: rand(1, 5), blinkPhase: 0,
       // hop state
       hop: null,
     });
@@ -241,6 +251,16 @@
     for (let i = creatures.length - 1; i >= 0; i--) {
       const c = creatures[i];
       c.pop += (0 - c.pop) * Math.min(1, dt * 8);
+
+      // occasional blink: idle, then a quick close-and-open (~0.16s)
+      if (c.blinkCooldown > 0) { c.blinkCooldown -= dt; c.blink = 0; }
+      else {
+        c.blinkPhase += dt;
+        const half = 0.08;
+        if (c.blinkPhase < half) c.blink = c.blinkPhase / half;
+        else if (c.blinkPhase < 2 * half) c.blink = 1 - (c.blinkPhase - half) / half;
+        else { c.blink = 0; c.blinkPhase = 0; c.blinkCooldown = rand(2, 6); }
+      }
 
       // tadpoles & tadlets are born tiny, grow in, then keep enlarging slowly with age
       if (c.stage <= 1) {
@@ -326,7 +346,7 @@
   }
 
   // draw one creature at (x,y), size s. legKick is leg-extension delta (- = tucked, + = kicking).
-  function drawCreature(g, x, y, s, stage, color, wiggle, pop, rot, crouch = 0, legKick = 0) {
+  function drawCreature(g, x, y, s, stage, color, wiggle, pop, rot, crouch = 0, legKick = 0, blink = 0) {
     g.save();
     g.translate(x, y);
     if (rot) g.rotate(rot);
@@ -342,7 +362,7 @@
     g.scale(sx, sy);
 
     if (stage === 0 || stage === 1) drawTadpole(g, s, stage, wiggle);
-    else drawFrog(g, s, color, legKick);
+    else drawFrog(g, s, color, legKick, blink);
     g.restore();
   }
 
@@ -425,7 +445,8 @@
     }
   }
 
-  function drawFrog(g, s, color, legKick) {
+  function drawFrog(g, s, color, legKick, blink) {
+    blink = blink || 0;                 // 0 = eyes open, 1 = fully shut
     const ext = Math.max(0, legKick);   // 0 = folded/sitting, ~1 = mid-leap
     const dk = shade(color, -24), dker = shade(color, -42), lt = shade(color, 48);
     g.lineCap = "round"; g.lineJoin = "round";
@@ -457,12 +478,42 @@
     g.beginPath(); g.ellipse(0, s * 0.2, s * 0.96, s * 0.86, 0, 0.12 * Math.PI, 0.88 * Math.PI);
     g.strokeStyle = "rgba(255,255,255,.14)"; g.lineWidth = s * 0.14; g.stroke();
 
-    // ---- pale belly ----
-    const belly = g.createLinearGradient(0, s * 0.1, 0, s * 1.05);
-    belly.addColorStop(0, "rgba(255,255,255,.04)");
-    belly.addColorStop(1, "rgba(240,255,235,.42)");
-    g.beginPath(); g.ellipse(0, s * 0.55, s * 0.6, s * 0.52, 0, 0, Math.PI * 2);
-    g.fillStyle = belly; g.fill();
+    // ---- dapper waistcoat + cravat ----
+    const outfit = FROG_OUTFITS[parseInt(color.slice(1), 16) % FROG_OUTFITS.length];
+    // waistcoat: a V-neck vest over the belly
+    g.beginPath();
+    g.moveTo(0, s * 0.52);                                       // bottom of the V neckline
+    g.quadraticCurveTo(-s * 0.30, s * 0.34, -s * 0.5, s * 0.2);  // up to left shoulder
+    g.quadraticCurveTo(-s * 0.72, s * 0.62, -s * 0.5, s * 0.92); // down the left side
+    g.quadraticCurveTo(-s * 0.26, s * 1.12, 0, s * 1.1);         // to the bottom point
+    g.quadraticCurveTo(s * 0.26, s * 1.12, s * 0.5, s * 0.92);   // up the right side
+    g.quadraticCurveTo(s * 0.72, s * 0.62, s * 0.5, s * 0.2);
+    g.quadraticCurveTo(s * 0.30, s * 0.34, 0, s * 0.52);
+    g.closePath();
+    const vestG = g.createLinearGradient(0, s * 0.2, 0, s * 1.1);
+    vestG.addColorStop(0, shade(outfit.vest, 26));
+    vestG.addColorStop(1, shade(outfit.vest, -16));
+    g.fillStyle = vestG; g.fill();
+    g.lineWidth = s * 0.05; g.strokeStyle = shade(outfit.vest, -38); g.stroke();
+    // centre seam + buttons
+    g.beginPath(); g.moveTo(0, s * 0.56); g.lineTo(0, s * 1.02);
+    g.lineWidth = s * 0.03; g.strokeStyle = shade(outfit.vest, -32); g.stroke();
+    g.fillStyle = outfit.button;
+    for (const by of [0.66, 0.82, 0.98]) { g.beginPath(); g.arc(0, s * by, s * 0.06, 0, Math.PI * 2); g.fill(); }
+    // cravat: a puffy knot tucked into the V
+    g.beginPath();
+    g.moveTo(0, s * 0.19);
+    g.quadraticCurveTo(-s * 0.23, s * 0.28, -s * 0.15, s * 0.5);
+    g.quadraticCurveTo(0, s * 0.63, s * 0.15, s * 0.5);
+    g.quadraticCurveTo(s * 0.23, s * 0.28, 0, s * 0.19);
+    g.closePath();
+    g.fillStyle = outfit.cravat; g.fill();
+    g.strokeStyle = shade(outfit.cravat, -30); g.lineWidth = s * 0.025; g.stroke();
+    // knot
+    g.beginPath(); g.ellipse(0, s * 0.25, s * 0.16, s * 0.12, 0, 0, Math.PI * 2);
+    g.fillStyle = shade(outfit.cravat, 20); g.fill();
+    g.strokeStyle = shade(outfit.cravat, -25); g.lineWidth = s * 0.03;
+    g.beginPath(); g.moveTo(0, s * 0.36); g.lineTo(0, s * 0.5); g.stroke();
 
     // ---- front hands resting at the bottom ----
     for (const dir of [-1, 1]) {
@@ -473,39 +524,50 @@
       webFoot(g, fX, fY, dir, s * 0.22, color);
     }
 
-    // ---- eyes: big domes seated on top of the head ----
+    // ---- eyes: big domes seated on top of the head (they blink) ----
+    const open = Math.max(0.04, 1 - blink);
     for (const dir of [-1, 1]) {
-      const ex = dir * s * 0.44, ey = -s * 0.66, er = s * 0.44;
+      const ex = dir * s * 0.42, ey = -s * 0.66, er = s * 0.46;
       // dome, blended into the head colour with a darker outline
       g.beginPath(); g.arc(ex, ey, er, 0, Math.PI * 2);
       g.fillStyle = shade(color, 10); g.fill();
       g.lineWidth = s * 0.06; g.strokeStyle = dk; g.stroke();
-      // eyeball
-      g.beginPath(); g.arc(ex, ey - er * 0.04, er * 0.66, 0, Math.PI * 2);
+      // eyeball group — squashes vertically as the lid closes
+      g.save();
+      g.translate(ex, ey - er * 0.04);
+      g.scale(1, open);
+      g.beginPath(); g.arc(0, 0, er * 0.68, 0, Math.PI * 2);
       g.fillStyle = "#fdfff7"; g.fill();
-      // golden iris + pupil
-      g.beginPath(); g.arc(ex, ey + er * 0.06, er * 0.42, 0, Math.PI * 2);
-      g.fillStyle = "#e3c04a"; g.fill();
-      g.beginPath(); g.arc(ex, ey + er * 0.06, er * 0.24, 0, Math.PI * 2);
-      g.fillStyle = "#15100f"; g.fill();
-      // glint
-      g.beginPath(); g.arc(ex - er * 0.2, ey - er * 0.16, er * 0.13, 0, Math.PI * 2);
-      g.fillStyle = "#fff"; g.fill();
-      // upper eyelid
+      g.beginPath(); g.arc(0, er * 0.1, er * 0.44, 0, Math.PI * 2);
+      g.fillStyle = "#e3c04a"; g.fill();                       // golden iris
+      g.beginPath(); g.arc(0, er * 0.1, er * 0.25, 0, Math.PI * 2);
+      g.fillStyle = "#15100f"; g.fill();                       // pupil
+      g.beginPath(); g.arc(-er * 0.2, -er * 0.18, er * 0.14, 0, Math.PI * 2);
+      g.fillStyle = "#fff"; g.fill();                          // glint
+      g.restore();
+      // eyelid line — becomes a happy lash when mostly shut
+      if (blink > 0.12) {
+        g.strokeStyle = dk; g.lineWidth = s * 0.07; g.lineCap = "round";
+        g.beginPath();
+        g.moveTo(ex - er * 0.62, ey - er * 0.05);
+        g.quadraticCurveTo(ex, ey + er * 0.06 * blink, ex + er * 0.62, ey - er * 0.05);
+        g.stroke();
+      }
+      // upper eyelid rim
       g.beginPath(); g.arc(ex, ey - er * 0.02, er * 0.92, Math.PI * 1.08, Math.PI * 1.92);
       g.lineWidth = s * 0.07; g.strokeStyle = shade(color, -18); g.stroke();
     }
 
     // ---- nostrils, mouth, cheeks ----
     g.fillStyle = dker;
-    g.beginPath(); g.arc(-s * 0.12, -s * 0.14, s * 0.045, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(s * 0.12, -s * 0.14, s * 0.045, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(-s * 0.12, -s * 0.16, s * 0.045, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(s * 0.12, -s * 0.16, s * 0.045, 0, Math.PI * 2); g.fill();
     // wide friendly smile with little upturned corners
-    g.strokeStyle = dker; g.lineWidth = s * 0.1;
-    g.beginPath(); g.arc(0, s * 0.0, s * 0.5, 0.13 * Math.PI, 0.87 * Math.PI); g.stroke();
-    g.fillStyle = "rgba(255,150,170,.22)";
-    g.beginPath(); g.ellipse(-s * 0.56, s * 0.32, s * 0.16, s * 0.11, 0, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.ellipse(s * 0.56, s * 0.32, s * 0.16, s * 0.11, 0, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = dker; g.lineWidth = s * 0.1; g.lineCap = "round";
+    g.beginPath(); g.arc(0, -s * 0.04, s * 0.48, 0.13 * Math.PI, 0.87 * Math.PI); g.stroke();
+    g.fillStyle = "rgba(255,150,170,.28)";
+    g.beginPath(); g.ellipse(-s * 0.58, s * 0.02, s * 0.17, s * 0.12, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(s * 0.58, s * 0.02, s * 0.17, s * 0.12, 0, 0, Math.PI * 2); g.fill();
   }
 
   function shade(hex, amt) {
@@ -534,9 +596,9 @@
         const hp = c.hop;
         // tuck legs during the crouch, kick hard at launch, then trail
         const legKick = hp.phase === "crouch" ? -0.5 * hp.crouch : Math.max(-0.1, 1 - hp.t * 3.5);
-        drawCreature(ctx, c.x, c.y, c.r, c.stage, c.color, c.wiggle, c.pop, hp.rot, hp.crouch, legKick);
+        drawCreature(ctx, c.x, c.y, c.r, c.stage, c.color, c.wiggle, c.pop, hp.rot, hp.crouch, legKick, c.blink);
       } else {
-        drawCreature(ctx, c.x, c.y, c.r, c.stage, c.color, c.wiggle, c.pop, 0);
+        drawCreature(ctx, c.x, c.y, c.r, c.stage, c.color, c.wiggle, c.pop, 0, 0, 0, c.blink);
       }
     }
 
@@ -600,8 +662,11 @@
       const stage = +dc.dataset.stage;
       const hopY = stage === 3 ? -Math.abs(Math.sin(demoT * 2)) * 14 : 0;
       const legKick = stage === 3 ? Math.max(0, Math.sin(demoT * 2)) * 0.8 : 0;
+      // periodic blink for the demo frogs
+      const bt = demoT % 3;
+      const blink = bt < 0.16 ? (bt < 0.08 ? bt / 0.08 : 1 - (bt - 0.08) / 0.08) : 0;
       drawCreature(g, 40, 44 + hopY, 14, stage, "#7dffa8", demoT * 6, 0,
-        stage === 3 ? Math.sin(demoT) * 0.25 : 0, 0, legKick);
+        stage === 3 ? Math.sin(demoT) * 0.25 : 0, 0, legKick, blink);
     }
     if (!running) requestAnimationFrame(drawDemos);
   }
